@@ -1,0 +1,122 @@
+import cv2
+import numpy as np
+import pytesseract
+import os
+from pyzbar.pyzbar import decode
+import shutil
+# path of tesseract from program Files
+
+file_source= 'C:\\Users\\21269\\OneDrive\\Bureau\\src'
+file_destination= 'C:\\Users\\21269\\OneDrive\\Bureau\\dest'
+
+per = 25
+pixelThreshold = 1800
+roi = [[(576, 750), (644, 818), 'box', 'sign'], [(600, 408), (1058, 454), 'barcodee', 'Barbox']]
+#lier notre fichier
+pytesseract.pytesseract.tesseract_cmd = "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
+imgQ = cv2.imread('c.jpeg')
+h, w, c = imgQ.shape
+# imgQ = cv2.resize(imgQ,(w//3,h//3))
+#creation de detecteur orb
+orb = cv2.ORB_create(1000)
+kp1, des1 = orb.detectAndCompute(imgQ, None)
+# impkp1 = cv2.drawKeypoints(imgQ,kp1,None)
+
+#Liste des noms de toutes  les images
+myPic = os.listdir(file_source)
+print(myPic)
+#combien de fois la boucle a ete execute j
+for i, j in enumerate(myPic):
+            img = cv2.imread(file_source + "/" + j)
+            # img = cv2.resize(img,(w//2,h//2))
+            # cv2.imshow(j,img)
+            #trouver les descripteurs
+            kp2, des2 = orb.detectAndCompute(img, None)
+            #trouver la correspondance
+            bf = cv2.BFMatcher(cv2.NORM_HAMMING)
+            matches = bf.match(des2, des1)
+            #only good matches
+            # lambda permet de trier toutes les valeurs de correspon dance en fct de la distance
+            sorted(matches, key=lambda x: x.distance)
+            #extraction de good matches
+            #donner 25 percent des meilleurs matchs
+            good = matches[:int(len(matches) * (per / 100))]
+            #dessiner
+            imgMatch = cv2.drawMatches(img, kp2, imgQ, kp1, good, None, flags=2)
+
+            # cv2.imshow(j,imgMatch)
+            #utiliser matches pour trouver la srcPoints et dstPoints
+            #trouver la relation entre les 2
+            #trouver tous les points dans notre liste puis trouver les pts reels ente eux
+            srcPoints = np.float32([kp2[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
+            dstPoints = np.float32([kp1[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+            #avec les deux nous allons trouver la matrice m
+
+            M, _ = cv2.findHomography(srcPoints, dstPoints, cv2.RANSAC, 5.0)
+            #utiliser la matrice pour aligner notre formulaire
+            imgScan = cv2.warpPerspective(img, M, (w, h))
+
+            # cv2.imshow(j,imgScan)
+            imgShow = imgScan.copy()
+            imgMask = np.zeros_like(imgShow)
+
+            myData = []
+            #Parcourir toutes les regions qu on veut
+
+            for x, y in enumerate(roi):
+                #creer rectangle sur ce mask et le superposera sur l image org
+                cv2.rectangle(imgMask, ((y[0][0]), y[0][1]), ((y[1][0]), y[1][1]), (0, 255, 0), cv2.FILLED)
+                imgShow = cv2.addWeighted(imgShow, 0.99, imgMask, 0.1, 0)
+                #recadrage de l iamge
+                imgCrop = imgScan[y[0][1]:y[1][1], y[0][0]:y[1][0]]
+                cv2.imshow(str(x), imgCrop)
+
+                if y[2] == 'text':
+                    print(f'{y[3]} :{pytesseract.image_to_string(imgCrop)}')
+                    #envoyer a pytesseract
+                    myData.append(pytesseract.image_to_string(imgCrop))
+                    #TRAITEMENT 1
+                if y[2] == 'box':
+                    #convertir en gris
+                    imgGray = cv2.cvtColor(imgCrop, cv2.COLOR_BGR2GRAY)
+                    #detecte retourne 1 sinon 0
+                    imgThresh = cv2.threshold(imgGray, 170, 255, cv2.THRESH_BINARY_INV)[1]
+                    totalPixels = cv2.countNonZero(imgThresh)
+
+                    #for checkbox
+                    if totalPixels > pixelThreshold:
+                          totalPixels = 1;
+                    else:
+                          totalPixels = 0
+
+                    print(f'{y[3]} :{totalPixels}')
+                    myData.append(totalPixels)
+
+            # imgShow = cv2.resize(imgShow,(w//2,h//2))
+            cv2.imshow(j + "2", imgShow)
+
+            # TRAITEMENT 2
+            # for barcode
+            if y[2] == 'barcodee':
+                for barcode in decode(img):
+                    print("Barcode value : ", barcode.data)
+                    myData.append(barcode.data)
+
+                    cv2.imshow(j + "2", imgShow)
+
+            with open('Dataa.csv', 'a+') as f:
+                for d in myData:
+                   f.write(str(d)+',')
+
+                   f.write('\n')
+
+for g in myPic:
+    print(g)
+    shutil.copy(file_source +'\\'+str(g), file_destination)
+    os.remove(file_source +'\\'+str(g))
+
+
+            # cv2.imshow("keyPoints",impkp1)
+cv2.imshow("Output", imgQ)
+cv2.waitKey(0)
+
